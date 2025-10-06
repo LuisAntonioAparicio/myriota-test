@@ -6,7 +6,7 @@ import os
 
 app = Flask(__name__)
 
-# Archivo para guardar los mensajes (persistente)
+# Archivo para guardar los mensajes
 MESSAGES_FILE = "myriota_messages.json"
 
 def load_messages():
@@ -14,7 +14,7 @@ def load_messages():
     try:
         with open(MESSAGES_FILE, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return []
 
 def save_message(data):
@@ -29,89 +29,77 @@ def save_message(data):
     
     messages.append(new_message)
     
-    with open(MESSAGES_FILE, 'w') as f:
-        json.dump(messages, f, indent=2)
+    try:
+        with open(MESSAGES_FILE, 'w') as f:
+            json.dump(messages, f, indent=2)
+    except Exception as e:
+        print(f"Error guardando mensaje: {e}")
     
     return new_message
 
 @app.route('/', methods=['GET'])
 def home():
     """Página principal"""
-    return """
+    return '''
     <html>
         <head>
             <title>🚀 Myriota Webhook Test</title>
             <style>
                 body { font-family: Arial, sans-serif; margin: 40px; }
-                .endpoint { background: #f0f0f0; padding: 10px; border-radius: 5px; }
+                .endpoint { background: #f0f0f0; padding: 15px; border-radius: 8px; margin: 20px 0; }
+                code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
             </style>
         </head>
         <body>
             <h1>📡 Servidor de Prueba Myriota</h1>
-            <p>Este servidor está listo para recibir mensajes de Myriota</p>
+            <p>¡El servidor está funcionando correctamente! 🎉</p>
             
-            <h2>📋 Endpoints disponibles:</h2>
             <div class="endpoint">
-                <strong>POST</strong> <code>/webhook/myriota</code> - Recibir mensajes<br>
-                <strong>GET</strong> <code>/messages</code> - Ver todos los mensajes<br>
-                <strong>GET</strong> <code>/clear</code> - Limpiar mensajes
+                <h3>📋 Endpoints disponibles:</h3>
+                <p><strong>POST</strong> <code>/webhook/myriota</code> - Recibir mensajes de Myriota</p>
+                <p><strong>GET</strong> <code>/messages</code> - Ver todos los mensajes recibidos</p>
+                <p><strong>GET</strong> <code>/clear</code> - Limpiar mensajes (solo pruebas)</p>
             </div>
             
-            <h2>🔧 Uso:</h2>
-            <p>Configura en Myriota Device Manager la URL:</p>
-            <code id="webhookUrl">https://[TU_URL_AQUI]/webhook/myriota</code>
+            <h3>🔧 Para configurar en Myriota:</h3>
+            <p>Usa esta URL en Myriota Device Manager:</p>
+            <code id="webhookUrl"></code>
             
             <script>
-                // Mostrar la URL actual
                 document.getElementById('webhookUrl').textContent = 
                     window.location.origin + '/webhook/myriota';
             </script>
         </body>
     </html>
-    """
+    '''
 
-@app.route('/webhook/myriota', methods=['POST'])
+@app.route('/webhook/myriota', methods=['POST', 'GET'])
 def webhook_myriota():
     """Endpoint para recibir mensajes de Myriota"""
     try:
-        # Log completo para debugging
-        print("=" * 50)
-        print("📨 NUEVO MENSAJE RECIBIDO")
-        print("=" * 50)
+        print("📨 Solicitud recibida en /webhook/myriota")
         
-        # Headers
-        print("📋 HEADERS:")
-        for key, value in request.headers:
-            print(f"  {key}: {value}")
+        if request.method == 'GET':
+            return jsonify({
+                "status": "ready",
+                "message": "Endpoint listo para recibir POST de Myriota"
+            })
         
-        # Datos JSON
-        if request.is_json:
-            json_data = request.get_json()
-            print("📦 JSON DATA:")
-            print(json.dumps(json_data, indent=2))
-        else:
-            print("📦 RAW DATA:", request.data)
-        
-        # Parámetros query string
-        print("🔍 QUERY PARAMS:", dict(request.args))
-        
-        # Form data
-        print("📝 FORM DATA:", dict(request.form))
-        
-        # Guardar el mensaje
-        message_to_save = {
+        # Procesar POST request
+        message_data = {
             "headers": dict(request.headers),
             "json": request.get_json(silent=True),
             "args": dict(request.args),
             "form": dict(request.form),
             "raw_data": request.data.decode('utf-8') if request.data else None,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "method": request.method
         }
         
-        saved_message = save_message(message_to_save)
+        print(f"✅ Datos recibidos: {json.dumps(message_data, indent=2)}")
         
-        print(f"✅ Mensaje guardado con ID: {saved_message['id']}")
-        print("=" * 50)
+        # Guardar el mensaje
+        saved_message = save_message(message_data)
         
         return jsonify({
             "status": "success",
@@ -121,40 +109,65 @@ def webhook_myriota():
         }), 200
         
     except Exception as e:
-        print("❌ ERROR:", str(e))
+        print(f"❌ Error en webhook: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/messages', methods=['GET'])
 def get_messages():
     """Ver todos los mensajes recibidos"""
-    messages = load_messages()
-    
-    html = f"""
-    <html>
-        <head><title>Mensajes Recibidos</title></head>
-        <body>
-            <h1>📨 Mensajes Recibidos: {len(messages)}</h1>
-            <a href="/">← Volver al inicio</a>
-            <hr>
-    """
-    
-    for msg in messages:
-        html += f"""
-        <div style="border: 1px solid #ccc; margin: 10px; padding: 15px;">
-            <h3>Mensaje #{msg['id']} - {msg['received_at']}</h3>
-            <pre>{json.dumps(msg['data'], indent=2)}</pre>
-        </div>
-        """
-    
-    html += "</body></html>"
-    return html
+    try:
+        messages = load_messages()
+        
+        response = {
+            "total_messages": len(messages),
+            "messages": messages
+        }
+        
+        # Si es solicitud HTML, mostrar página bonita
+        if request.headers.get('Accept', '').find('text/html') >= 0:
+            html = f"""
+            <html>
+                <head><title>Mensajes Recibidos</title></head>
+                <body>
+                    <h1>📨 Mensajes Recibidos: {len(messages)}</h1>
+                    <a href="/">← Volver al inicio</a>
+                    <hr>
+            """
+            
+            for msg in messages:
+                html += f"""
+                <div style="border: 1px solid #ddd; margin: 15px; padding: 15px; border-radius: 8px;">
+                    <h3>Mensaje #{msg['id']} - {msg['received_at']}</h3>
+                    <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px;">
+{json.dumps(msg['data'], indent=2, ensure_ascii=False)}
+                    </pre>
+                </div>
+                """
+            
+            html += "</body></html>"
+            return html
+        else:
+            return jsonify(response)
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/clear', methods=['GET'])
 def clear_messages():
-    """Limpiar todos los mensajes"""
-    with open(MESSAGES_FILE, 'w') as f:
-        json.dump([], f)
-    return "✅ Todos los mensajes han sido eliminados. <a href='/'>Volver</a>"
+    """Limpiar todos los mensajes (solo para pruebas)"""
+    try:
+        with open(MESSAGES_FILE, 'w') as f:
+            json.dump([], f)
+        return "✅ Todos los mensajes han sido eliminados. <a href='/'>Volver al inicio</a>"
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Endpoint de salud para Render"""
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+# Configuración para producción
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
